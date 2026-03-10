@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RainAlert Mobile</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='mobile_style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="mobile-container">
+        <!-- Status Bar -->
+        <header>
+            <div class="status-badge live">LIVE</div>
+            <h1>RainAlert <span class="iot">IoT</span></h1>
+            <div class="header-actions">
+                <button id="settings-btn" class="icon-btn">⚙️</button>
+                <select id="station-select" class="station-select">
+                    {% for id, info in stations.items() %}
+                        <option value="{{ id }}">{{ info.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </header>
+
+        <!-- Settings Modal -->
+        <div id="settings-modal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Settings</h2>
+                    <button id="close-settings" class="close-btn">&times;</button>
+                </div>
+                <div class="setting-item">
+                    <label>Warning Threshold (%)</label>
+                    <input type="range" id="warn-threshold" min="30" max="70" value="60">
+                    <span id="warn-val">60%</span>
+                </div>
+                <div class="setting-item">
+                    <label>Critical Threshold (%)</label>
+                    <input type="range" id="crit-threshold" min="70" max="95" value="80">
+                    <span id="crit-val">80%</span>
+                </div>
+                <div class="setting-item checkbox">
+                    <label>Use Live OpenWeather API</label>
+                    <input type="checkbox" id="use-owm-check">
+                </div>
+                <button id="save-settings" class="save-btn">Save Changes</button>
+            </div>
+        </div>
+
+        <!-- Forecast Card -->
+        <div class="forecast-card">
+            <label>Predictive Outlook</label>
+            <div class="outlook-grid">
+                <div class="outlook-item">
+                    <span>30m</span>
+                    <h4 id="outlook-30m">--%</h4>
+                </div>
+                <div class="outlook-item">
+                    <span>1h</span>
+                    <h4 id="outlook-1h">--%</h4>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Dashboard Card -->
+        <div class="main-card">
+            <div id="alert-banner" class="alert-banner hidden">
+                <span id="alert-text"></span>
+                <ul id="safety-tips" class="safety-list"></ul>
+            </div>
+            
+            <div class="prediction-view">
+                <div class="prob-circle">
+                    <span id="prob-percent">0%</span>
+                    <label>Rain Prob</label>
+                </div>
+                <div class="status-text">
+                    <div class="status-header">
+                        <h2 id="status-label">Analyzing...</h2>
+                        <span id="denoise-badge" class="denoise-badge">AE Denoising</span>
+                    </div>
+                    <p id="ai-reasoning" class="ai-reasoning">Waiting for consensus data...</p>
+                    <p id="time-stamp">Last Update: Just now</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Notification Hub (Simulated Field Alerts) -->
+        <div class="notif-card">
+            <div class="notif-header">
+                <label>Notification Hub (Field Comms)</label>
+                <span class="notif-badge">Active</span>
+            </div>
+            <div id="notif-list" class="notif-list">
+                <div class="notif-item system">System: Monitoring established. All IoT nodes reporting.</div>
+            </div>
+        </div>
+
+        <!-- Regional Risk Map (India) -->
+        <div class="map-card india-map-card">
+            <label>National Risk Map (India)</label>
+            <div id="risk-map" class="risk-map">
+                <svg viewBox="0 0 600 700" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+                    <!-- Simplified India Outline Path -->
+                    <path d="M300,10 L320,50 L360,60 L380,100 L420,120 L450,180 L440,240 L460,300 L430,360 L440,420 L410,480 L380,550 L350,620 L300,680 L250,620 L220,550 L190,480 L160,420 L170,360 L140,300 L160,240 L150,180 L180,120 L220,100 L240,60 L280,50 Z" 
+                          fill="#1a1a1a" stroke="#444" stroke-width="2" />
+                    
+                    <!-- Regional Connection Mesh -->
+                    <line x1="300" y1="350" x2="320" y2="280" stroke="#333" stroke-width="1" stroke-dasharray="3,3" />
+                    <line x1="300" y1="350" x2="250" y2="380" stroke="#333" stroke-width="1" stroke-dasharray="3,3" />
+                    
+                    <!-- Station Nodes (India Map) -->
+                    <!-- Central Hub (Near Bangalore/South Central) -->
+                    <circle id="india-glow-1" cx="300" cy="550" r="25" fill="rgba(0,122,255,0.15)" class="map-glow"/>
+                    <circle id="india-stn-1" cx="300" cy="550" r="8" fill="#007AFF" class="map-node"/>
+                    <text x="300" y="575" fill="#888" font-size="12" text-anchor="middle">Central (BLR)</text>
+
+                    <!-- North Ridge (Near Delhi/North) -->
+                    <circle id="india-glow-2" cx="300" cy="200" r="25" fill="rgba(0,122,255,0.15)" class="map-glow"/>
+                    <circle id="india-stn-2" cx="300" cy="200" r="8" fill="#007AFF" class="map-node"/>
+                    <text x="300" y="225" fill="#888" font-size="12" text-anchor="middle">North (DEL)</text>
+
+                    <!-- West Valley (Near Mumbai/West) -->
+                    <circle id="india-glow-3" cx="180" cy="400" r="25" fill="rgba(0,122,255,0.15)" class="map-glow"/>
+                    <circle id="india-stn-3" cx="180" cy="400" r="8" fill="#007AFF" class="map-node"/>
+                    <text x="180" y="425" fill="#888" font-size="12" text-anchor="middle">West (BOM)</text>
+                </svg>
+            </div>
+        </div>
+
+        <!-- Regional Alert Feed -->
+        <div class="history-card">
+            <label>Regional Alert Feed (Global Events)</label>
+            <div id="alert-feed" class="alert-feed">
+                <!-- Populated via JS -->
+            </div>
+        </div>
+
+        <!-- Live Satellite Analysis -->
+        <div class="satellite-card">
+            <label>Live Satellite Analysis (IR/VIS)</label>
+            <div class="sat-view-container">
+                <canvas id="satCanvas"></canvas>
+                <div class="sat-overlay">
+                    <span id="sat-info">BTemp: 245K | VIS: 0.6</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Multi-Model Consensus Breakdown -->
+        <div class="chart-card">
+            <label>Multi-Model Consensus Breakdown</label>
+            <div class="model-grid">
+                <div class="model-item">
+                    <span class="model-name">XGBoost</span>
+                    <div class="model-bar-bg">
+                        <div id="xgb-bar" class="model-bar" style="width: 0%; background: #007AFF;"></div>
+                    </div>
+                    <span id="xgb-val" class="model-percent">0%</span>
+                </div>
+                <div class="model-item">
+                    <span class="model-name">Gradient Boosting</span>
+                    <div class="model-bar-bg">
+                        <div id="gbm-bar" class="model-bar" style="width: 0%; background: #FF9500;"></div>
+                    </div>
+                    <span id="gbm-val" class="model-percent">0%</span>
+                </div>
+                <div class="model-item">
+                    <span class="model-name">LSTM (Deep Learning)</span>
+                    <div class="model-bar-bg">
+                        <div id="lstm-bar" class="model-bar" style="width: 0%; background: #FF3B30;"></div>
+                    </div>
+                    <span id="lstm-val" class="model-percent">0%</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Model Reasoning Chart -->
+        <div class="chart-card">
+            <label>Model Reasoning (Local Feature Contribution)</label>
+            <canvas id="reasoningChart"></canvas>
+        </div>
+
+        <!-- Meteorological Insights & System Health -->
+        <div class="info-grid">
+            <div class="info-card">
+                <label>Meteorological Insights</label>
+                <ul id="insight-list" class="insight-list">
+                    <li>Analyzing atmospheric conditions...</li>
+                </ul>
+            </div>
+            <div class="info-card">
+                <label>System Health</label>
+                <div class="health-stats">
+                    <div class="health-item">
+                        <span>API Latency</span>
+                        <h4 id="health-latency">-- ms</h4>
+                    </div>
+                    <div class="health-item">
+                        <span>Model Cache</span>
+                        <h4 id="health-cache">--</h4>
+                    </div>
+                    <div class="health-item">
+                        <span>Database Size</span>
+                        <h4 id="health-db">-- KB</h4>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Trend Chart Section -->
+        <div class="chart-card">
+            <label>Rainfall Probability Trend (Last Hour)</label>
+            <canvas id="trendChart"></canvas>
+        </div>
+
+        <!-- Advanced Meteorological Features -->
+        <div class="sensor-grid advanced-grid">
+            <div class="sensor-card advanced">
+                <label>Dew Point</label>
+                <span id="adv-dew">--°C</span>
+            </div>
+            <div class="sensor-card advanced">
+                <label>Moisture Advection</label>
+                <span id="adv-moisture">--</span>
+            </div>
+            <div class="sensor-card advanced">
+                <label>Vapor Pressure (VPD)</label>
+                <span id="adv-vpd">-- kPa</span>
+            </div>
+            <div class="sensor-card advanced">
+                <label>Instability Index</label>
+                <span id="adv-instability">--</span>
+            </div>
+        </div>
+
+        <!-- IoT Sensor Grid -->
+        <div class="sensor-grid">
+            <div class="sensor-card">
+                <label>IoT Temp</label>
+                <span id="iot-temp">--°C</span>
+            </div>
+            <div class="sensor-card">
+                <label>IoT Humidity</label>
+                <span id="iot-hum">--%</span>
+            </div>
+            <div class="sensor-card">
+                <label>Sat Brightness</label>
+                <span id="sat-btemp">--K</span>
+            </div>
+            <div class="sensor-card">
+                <label>Radar Intensity</label>
+                <span id="radar-echo">-- dBZ</span>
+            </div>
+        </div>
+
+        <!-- Radar View Mock -->
+        <div class="radar-card">
+            <label>Live Radar Scan</label>
+            <div class="radar-container">
+                <canvas id="radarCanvas"></canvas>
+            </div>
+        </div>
+
+        <!-- History Section -->
+        <div class="history-card">
+            <div class="history-header">
+                <label>Recent Events</label>
+                <a href="/history" class="view-all">View All →</a>
+            </div>
+            <div id="history-list" class="history-list">
+                <!-- Populated via JS -->
+            </div>
+        </div>
+
+        <!-- Action Button -->
+        <button id="refresh-btn" class="fab-btn">🔄 Refresh IoT Data</button>
+    </div>
+
+    <script>
+        const alertBanner = document.getElementById('alert-banner');
+        const alertText = document.getElementById('alert-text');
+        const safetyTipsList = document.getElementById('safety-tips');
+        const probPercent = document.getElementById('prob-percent');
+        const statusLabel = document.getElementById('status-label');
+        const historyList = document.getElementById('history-list');
+        const stationSelect = document.getElementById('station-select');
+        const outlook30m = document.getElementById('outlook-30m');
+        const outlook1h = document.getElementById('outlook-1h');
+        
+        // Settings State
+        let warningThreshold = 0.6;
+        let criticalThreshold = 0.8;
+        let useOWM = false;
+
+        // Settings UI
+        const settingsModal = document.getElementById('settings-modal');
+        const settingsBtn = document.getElementById('settings-btn');
+        const closeSettings = document.getElementById('close-settings');
+        const warnRange = document.getElementById('warn-threshold');
+        const critRange = document.getElementById('crit-threshold');
+        const owmCheck = document.getElementById('use-owm-check');
+        const warnVal = document.getElementById('warn-val');
+        const critVal = document.getElementById('crit-val');
+
+        settingsBtn.onclick = (e) => {
+            e.preventDefault();
+            settingsModal.classList.remove('hidden');
+        };
+        closeSettings.onclick = (e) => {
+            e.preventDefault();
+            settingsModal.classList.add('hidden');
+        };
+        
+        // Close modal if clicking outside content
+        settingsModal.onclick = (e) => {
+            if (e.target === settingsModal) {
+                settingsModal.classList.add('hidden');
+            }
+        };
+        warnRange.oninput = () => warnVal.innerText = `${warnRange.value}%`;
+        critRange.oninput = () => critVal.innerText = `${critRange.value}%`;
+        
+        const saveBtn = document.getElementById('save-settings');
+        if (saveBtn) {
+            saveBtn.onclick = (e) => {
+                 e.preventDefault();
+                 e.stopPropagation();
+                 
+                 // Update global variables
+                 if (warnRange) warningThreshold = parseFloat(warnRange.value) / 100;
+                 if (critRange) criticalThreshold = parseFloat(critRange.value) / 100;
+                 if (owmCheck) useOWM = owmCheck.checked;
+                 
+                 // Immediately hide modal
+                 settingsModal.classList.add('hidden');
+                 
+                 // Optional: Trigger update
+                 updateDashboard().catch(err => {
+                     console.error("Update Dashboard Error:", err);
+                     // If it's a 404, we don't care, it's just waiting for data
+                 });
+             };
+        }
+
+        // Radar Animation
+        const radarCanvas = document.getElementById('radarCanvas');
+        const radarCtx = radarCanvas.getContext('2d');
+        let angle = 0;
+
+        function drawRadar() {
+            const centerX = radarCanvas.width / 2;
+            const centerY = radarCanvas.height / 2;
+            const radius = Math.min(centerX, centerY) - 10;
+
+            radarCtx.clearRect(0, 0, radarCanvas.width, radarCanvas.height);
+            
+            // Circles
+            radarCtx.strokeStyle = '#003d80';
+            for(let i=1; i<=3; i++) {
+                radarCtx.beginPath();
+                radarCtx.arc(centerX, centerY, radius * (i/3), 0, Math.PI*2);
+                radarCtx.stroke();
+            }
+
+            // Sweep
+            radarCtx.beginPath();
+            radarCtx.moveTo(centerX, centerY);
+            radarCtx.arc(centerX, centerY, radius, angle, angle + 0.2);
+            radarCtx.fillStyle = 'rgba(0, 122, 255, 0.2)';
+            radarCtx.fill();
+
+            angle += 0.05;
+            requestAnimationFrame(drawRadar);
+        }
+        
+        radarCanvas.width = 300;
+        radarCanvas.height = 150;
+        drawRadar();
+
+        // Satellite Simulation
+        const satCanvas = document.getElementById('satCanvas');
+        const satCtx = satCanvas.getContext('2d');
+        satCanvas.width = 300;
+        satCanvas.height = 150;
+
+        function drawSatellite(btemp, reflect) {
+            // Draw dark background
+            satCtx.fillStyle = '#050510';
+            satCtx.fillRect(0, 0, satCanvas.width, satCanvas.height);
+            
+            // Draw simulated clouds based on reflectivity and btemp
+            const cloudCount = Math.floor(reflect * 20) + 5;
+            const cloudAlpha = 1 - (btemp - 200) / 100; // Lower btemp = whiter clouds
+            
+            for(let i=0; i<cloudCount; i++) {
+                const x = (Math.sin(Date.now()*0.0001 + i) * 0.5 + 0.5) * satCanvas.width;
+                const y = (Math.cos(Date.now()*0.0002 + i*2) * 0.5 + 0.5) * satCanvas.height;
+                const size = (1 - cloudAlpha) * 30 + 20;
+                
+                const grad = satCtx.createRadialGradient(x, y, 0, x, y, size);
+                grad.addColorStop(0, `rgba(255, 255, 255, ${cloudAlpha * 0.4})`);
+                grad.addColorStop(1, 'transparent');
+                
+                satCtx.fillStyle = grad;
+                satCtx.beginPath();
+                satCtx.arc(x, y, size, 0, Math.PI*2);
+                satCtx.fill();
+            }
+            requestAnimationFrame(() => drawSatellite(btemp, reflect));
+        }
+
+        // Initialize Trend Chart
+        const ctx = document.getElementById('trendChart').getContext('2d');
+        const trendChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: Array(12).fill(''),
+                datasets: [{
+                    label: 'Probability',
+                    data: [],
+                    borderColor: '#007AFF',
+                    backgroundColor: 'rgba(0, 122, 255, 0.1)',
+                    fill: true,
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                animation: false,
+                scales: {
+                    y: { beginAtZero: true, max: 1, ticks: { color: '#A0A0A0' } },
+                    x: { display: false }
+                }
+            }
+        });
+
+        // Initialize Reasoning Chart
+        const rCtx = document.getElementById('reasoningChart').getContext('2d');
+        const reasoningChart = new Chart(rCtx, {
+            type: 'bar',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Importance %',
+                    data: [],
+                    backgroundColor: '#007AFF',
+                    borderRadius: 5
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { beginAtZero: true, max: 100, ticks: { color: '#A0A0A0' } },
+                    y: { ticks: { color: '#A0A0A0' } }
+                }
+            }
+        });
+
+        async function updateDashboard() {
+            const sid = stationSelect.value;
+            try {
+                const response = await fetch(`/api/latest_prediction/${sid}`);
+                if (!response.ok) {
+                    if (response.status === 404) {
+                        statusLabel.innerText = "WAITING FOR SENSOR DATA...";
+                        return;
+                    }
+                    const errorText = await response.text();
+                    throw new Error(`Latest Prediction API error (${response.status}): ${errorText}`);
+                }
+                const result = await response.json();
+
+                // Update UI sensors with real values from simulator
+                const sensors = result.sensors;
+                document.getElementById('iot-temp').innerText = `${sensors.temp}°C`;
+                document.getElementById('iot-hum').innerText = `${sensors.hum}%`;
+                document.getElementById('sat-btemp').innerText = `${sensors.btemp}K`;
+                document.getElementById('radar-echo').innerText = `${Math.max(0, sensors.radar)} dBZ`;
+                document.getElementById('sat-info').innerText = `BTemp: ${sensors.btemp}K | VIS: ${sensors.reflect}`;
+
+                // Update Advanced Features
+                if (result.advanced) {
+                    const adv = result.advanced;
+                    document.getElementById('adv-dew').innerText = `${adv.dew_point}°C`;
+                    document.getElementById('adv-moisture').innerText = adv.moisture_advection;
+                    document.getElementById('adv-vpd').innerText = `${adv.vpd} kPa`;
+                    document.getElementById('adv-instability').innerText = adv.instability;
+                }
+
+                // Update Prediction UI
+                probPercent.innerText = `${(result.probability * 100).toFixed(0)}%`;
+                
+                // Update AI Reasoning
+                if (result.reasoning) {
+                    document.getElementById('ai-reasoning').innerText = result.reasoning;
+                }
+                
+                if (result.owm_live) {
+                    statusLabel.innerText = `${result.owm_live.city}: ${result.owm_live.desc.toUpperCase()}`;
+                } else {
+                    statusLabel.innerText = result.probability > 0.8 ? "HEAVY PRECIPITATION" : 
+                                          result.probability > 0.5 ? "RAIN EXPECTED" : "CLEAR SKIES";
+                }
+                
+                // Update Forecasts
+                outlook30m.innerText = `${(result.outlook_30m * 100).toFixed(0)}%`;
+                outlook1h.innerText = `${(result.outlook_1h * 100).toFixed(0)}%`;
+
+                // Update Notification Hub
+                if (result.alert) {
+                    const nList = document.getElementById('notif-list');
+                    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    const notif = document.createElement('div');
+                    notif.className = 'notif-item alert';
+                    notif.innerText = `[${time}] ${result.station_name}: ${result.alert_message}`;
+                    
+                    // Only add if not duplicate of last one
+                    if (nList.firstChild.innerText !== notif.innerText) {
+                        nList.prepend(notif);
+                        if (nList.children.length > 5) nList.lastChild.remove();
+                    }
+                }
+
+                // Update Model Breakdown
+                if (result.model_breakdown) {
+                    const mb = result.model_breakdown;
+                    
+                    document.getElementById('xgb-val').innerText = `${(mb.XGBoost * 100).toFixed(0)}%`;
+                    document.getElementById('xgb-bar').style.width = `${mb.XGBoost * 100}%`;
+                    
+                    document.getElementById('gbm-val').innerText = `${(mb.GradientBoosting * 100).toFixed(0)}%`;
+                    document.getElementById('gbm-bar').style.width = `${mb.GradientBoosting * 100}%`;
+                    
+                    document.getElementById('lstm-val').innerText = `${(mb.DeepLearning_LSTM * 100).toFixed(0)}%`;
+                    document.getElementById('lstm-bar').style.width = `${mb.DeepLearning_LSTM * 100}%`;
+                }
+
+                // Update Insights & Health
+                if (result.insights) {
+                    const list = document.getElementById('insight-list');
+                    list.innerHTML = '';
+                    result.insights.forEach(insight => {
+                        const li = document.createElement('li');
+                        li.innerText = insight;
+                        list.appendChild(li);
+                    });
+                }
+                
+                if (result.health) {
+                    document.getElementById('health-latency').innerText = `${result.health.latency_ms} ms`;
+                    document.getElementById('health-cache').innerText = result.health.cache;
+                    document.getElementById('health-db').innerText = `${result.health.db_size_kb} KB`;
+                }
+
+                // Update Trend Chart
+                trendChart.data.datasets[0].data = result.history || [];
+                trendChart.update();
+
+                // Update Reasoning Chart
+                if (result.importance) {
+                    reasoningChart.data.labels = Object.keys(result.importance);
+                    reasoningChart.data.datasets[0].data = Object.values(result.importance);
+                    reasoningChart.update();
+                }
+
+                // Update Map Risk Colors
+                const getColor = (p) => p > 0.8 ? '#FF3B30' : (p > 0.5 ? '#FF9500' : '#007AFF');
+                const getGlowColor = (p) => p > 0.8 ? 'rgba(255,59,48,0.4)' : (p > 0.5 ? 'rgba(255,149,0,0.4)' : 'rgba(0,122,255,0.4)');
+                
+                // Fetch all stations for the map
+                const summaryResp = await fetch('/api/latest_stations');
+                const summary = await summaryResp.json();
+                
+                const p1 = summary['STN_001']?.prob || 0.1;
+                const p2 = summary['STN_002']?.prob || 0.1;
+                const p3 = summary['STN_003']?.prob || 0.1;
+
+                document.getElementById('india-stn-1').setAttribute('fill', getColor(p1));
+                document.getElementById('india-glow-1').setAttribute('fill', getGlowColor(p1));
+                document.getElementById('india-glow-1').setAttribute('r', 15 + p1 * 15);
+
+                document.getElementById('india-stn-2').setAttribute('fill', getColor(p2));
+                document.getElementById('india-glow-2').setAttribute('fill', getGlowColor(p2));
+                document.getElementById('india-glow-2').setAttribute('r', 15 + p2 * 15);
+                
+                document.getElementById('india-stn-3').setAttribute('fill', getColor(p3));
+                document.getElementById('india-glow-3').setAttribute('fill', getGlowColor(p3));
+                document.getElementById('india-glow-3').setAttribute('r', 15 + p3 * 15);
+
+                // Alert and Safety Tips handling
+                if (result.alert) {
+                    alertBanner.className = `alert-banner visible ${result.probability > 0.8 ? 'critical' : 'warning'}`;
+                    alertText.innerText = result.alert_message;
+                    
+                    if (result.probability > 0.8) {
+                        document.body.classList.add('emergency-mode');
+                    } else {
+                        document.body.classList.remove('emergency-mode');
+                    }
+                    
+                    safetyTipsList.innerHTML = '';
+                    result.safety_tips.forEach(tip => {
+                        const li = document.createElement('li');
+                        li.innerText = tip;
+                        safetyTipsList.appendChild(li);
+                    });
+                } else {
+                    alertBanner.className = "alert-banner hidden";
+                    safetyTipsList.innerHTML = '';
+                    document.body.classList.remove('emergency-mode');
+                }
+
+                // Update History List
+                const histResp = await fetch('/api/history');
+                if (!histResp.ok) throw new Error(`History API error: ${histResp.status}`);
+                const logs = await histResp.json();
+                
+                // 1. Current Station History
+                historyList.innerHTML = '';
+                logs.filter(l => l.station_id === sid).slice(0, 5).forEach(log => {
+                    const item = document.createElement('div');
+                    item.className = 'history-item';
+                    item.innerHTML = `
+                        <div class="hist-main">
+                            <span class="hist-time">${log.timestamp.split(' ')[1]}</span>
+                            <span class="hist-prob ${log.prob > 0.6 ? 'high' : ''}">${(log.prob * 100).toFixed(0)}%</span>
+                        </div>
+                    `;
+                    historyList.appendChild(item);
+                });
+
+                // 2. Global Alert Feed (Recent high probability events from any station)
+                const alertFeed = document.getElementById('alert-feed');
+                alertFeed.innerHTML = '';
+                logs.filter(l => l.prob > 0.5).slice(0, 5).forEach(log => {
+                    const item = document.createElement('div');
+                    item.className = 'history-item';
+                    const stnName = log.station_id === 'STN_001' ? 'Central' : (log.station_id === 'STN_002' ? 'North' : 'West');
+                    item.innerHTML = `
+                        <div class="hist-main">
+                            <span class="hist-time" style="color: #FF9500;">${stnName}</span>
+                            <span class="hist-prob ${log.prob > 0.8 ? 'high' : ''}">${(log.prob * 100).toFixed(0)}%</span>
+                        </div>
+                    `;
+                    alertFeed.appendChild(item);
+                });
+
+            } catch (err) {
+                console.error("Dashboard Update error:", err);
+            }
+        }
+
+        stationSelect.onchange = updateDashboard;
+
+        document.getElementById('refresh-btn').onclick = updateDashboard;
+        // Auto-refresh every 10 seconds
+        setInterval(updateDashboard, 10000);
+        updateDashboard();
+    </script>
+</body>
+</html>

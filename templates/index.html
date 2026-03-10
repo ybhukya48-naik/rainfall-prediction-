@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rainfall Detection System</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <h1>Rainfall Detection</h1>
+        {% if mode %}
+            <p style="text-align: center; font-size: 0.8rem; color: #666;">Mode: {{ mode }}</p>
+        {% endif %}
+        <form action="/predict" method="post">
+            <div class="form-group">
+                <label for="temperature">Temperature (°C):</label>
+                <input type="number" step="0.1" name="temperature" required>
+            </div>
+            <div class="form-group">
+                <label for="humidity">Humidity (%):</label>
+                <input type="number" step="0.1" name="humidity" required>
+            </div>
+            <div class="form-group">
+                <label for="pressure">Pressure (hPa):</label>
+                <input type="number" step="0.1" name="pressure" required>
+            </div>
+            <div class="form-group">
+                <label for="wind_speed">Wind Speed (km/h):</label>
+                <input type="number" step="0.1" name="wind_speed" required>
+            </div>
+            <button type="submit">Predict</button>
+        </form>
+        {% if prediction_text %}
+            <div class="result">
+                <h3>{{ prediction_text }}</h3>
+                <p>{{ probability }}</p>
+            </div>
+        {% endif %}
+    </div>
+</body>
+</html>

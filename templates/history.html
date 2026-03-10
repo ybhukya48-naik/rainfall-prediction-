@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RainAlert History</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='mobile_style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="mobile-container">
+        <header>
+            <a href="/" class="back-link">← Dashboard</a>
+            <h1>Historical <span class="iot">Logs</span></h1>
+        </header>
+
+        <!-- Stats Overview -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <label>Avg Prob</label>
+                <h3 id="avg-prob">--%</h3>
+            </div>
+            <div class="stat-card">
+                <label>Max Radar</label>
+                <h3 id="max-radar">-- dBZ</h3>
+            </div>
+        </div>
+
+        <!-- Regional Comparison -->
+        <div class="chart-card" style="height: 180px;">
+            <label>Current Regional Comparison</label>
+            <canvas id="comparisonChart"></canvas>
+        </div>
+
+        <!-- Regional Risk Heatmap -->
+        <div class="chart-card">
+            <label>Regional Risk Heatmap (Spatial Density)</label>
+            <div id="heatmap-container" class="heatmap-container">
+                <canvas id="heatmapCanvas"></canvas>
+            </div>
+        </div>
+
+        <!-- Long Term Trend -->
+        <div class="chart-card" style="height: 250px;">
+            <label>24-Hour Probability Trend</label>
+            <canvas id="historyTrendChart"></canvas>
+        </div>
+
+        <!-- Filter & Export -->
+        <div class="history-card">
+            <div class="history-header">
+                <label>Detailed Logs (Last 50)</label>
+                <a href="/api/export" class="export-link">📥 Download CSV</a>
+            </div>
+            <div id="full-history-list" class="history-list" style="max-height: 400px;">
+                <!-- Populated via JS -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function loadHistory() {
+            try {
+                const response = await fetch('/api/history');
+                const logs = await response.json();
+                
+                // Calculate Stats
+                const probs = logs.map(l => l.prob);
+                const avgProb = (probs.reduce((a, b) => a + b, 0) / probs.length * 100).toFixed(1);
+                const maxRadar = Math.max(...logs.map(l => l.radar)).toFixed(1);
+                
+                document.getElementById('avg-prob').innerText = `${avgProb}%`;
+                document.getElementById('max-radar').innerText = `${maxRadar} dBZ`;
+
+                // Render List
+                const list = document.getElementById('full-history-list');
+                list.innerHTML = '';
+                logs.forEach(log => {
+                    const item = document.createElement('div');
+                    item.className = 'history-item';
+                    item.innerHTML = `
+                        <div class="hist-main">
+                            <span class="hist-time">${log.timestamp}</span>
+                            <span class="hist-alert">${log.alert || 'Normal'}</span>
+                        </div>
+                        <div class="hist-details">
+                            <span>T: ${log.temp}°C</span>
+                            <span>H: ${log.hum}%</span>
+                            <span class="hist-prob ${log.prob > 0.6 ? 'high' : ''}">${(log.prob * 100).toFixed(0)}%</span>
+                        </div>
+                    `;
+                    list.appendChild(item);
+                });
+
+                // Render Comparison Chart
+                const compResp = await fetch('/api/latest_stations');
+                const latest = await compResp.json();
+                const cCtx = document.getElementById('comparisonChart').getContext('2d');
+                new Chart(cCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: Object.values(latest).map(s => s.name),
+                        datasets: [{
+                            label: 'Current Prob %',
+                            data: Object.values(latest).map(s => (s.prob * 100).toFixed(0)),
+                            backgroundColor: ['#007AFF', '#FF9500', '#FF3B30'],
+                            borderRadius: 8
+                        }]
+                    },
+                    options: {
+                        indexAxis: 'y',
+                        plugins: { legend: { display: false } },
+                        scales: { x: { beginAtZero: true, max: 100, ticks: { color: '#888' } } }
+                    }
+                });
+
+                // Render Heatmap
+                const hCanvas = document.getElementById('heatmapCanvas');
+                const hCtx = hCanvas.getContext('2d');
+                hCanvas.width = hCanvas.offsetWidth;
+                hCanvas.height = hCanvas.offsetHeight;
+
+                function drawHeatmap(data) {
+                    hCtx.clearRect(0, 0, hCanvas.width, hCanvas.height);
+                    const stations = Object.values(data);
+                    
+                    stations.forEach((s, idx) => {
+                        const x = (idx + 1) * (hCanvas.width / (stations.length + 1));
+                        const y = hCanvas.height / 2;
+                        const radius = 20 + s.prob * 60;
+                        
+                        const grad = hCtx.createRadialGradient(x, y, 0, x, y, radius);
+                        const alpha = 0.1 + s.prob * 0.6;
+                        const color = s.prob > 0.8 ? `255, 59, 48` : (s.prob > 0.5 ? `255, 149, 0` : `0, 122, 255`);
+                        
+                        grad.addColorStop(0, `rgba(${color}, ${alpha})`);
+                        grad.addColorStop(1, 'transparent');
+                        
+                        hCtx.fillStyle = grad;
+                        hCtx.beginPath();
+                        hCtx.arc(x, y, radius, 0, Math.PI * 2);
+                        hCtx.fill();
+                        
+                        // Label
+                        hCtx.fillStyle = 'white';
+                        hCtx.font = '10px Inter';
+                        hCtx.textAlign = 'center';
+                        hCtx.fillText(s.name.split(' ')[0], x, y + radius + 10);
+                    });
+                }
+                drawHeatmap(latest);
+
+                // Render Multi-Model History Trend Chart
+                const hTrendCtx = document.getElementById('historyTrendChart').getContext('2d');
+                new Chart(hTrendCtx, {
+                    type: 'line',
+                    data: {
+                        labels: logs.map(l => l.timestamp.split(' ')[1]).reverse(),
+                        datasets: [
+                            {
+                                label: 'Ensemble Prob',
+                                data: probs.reverse(),
+                                borderColor: '#007AFF',
+                                backgroundColor: 'rgba(0, 122, 255, 0.1)',
+                                fill: true,
+                                tension: 0.3,
+                                pointRadius: 0
+                            },
+                            {
+                                label: 'XGBoost',
+                                data: logs.map(l => l.xgb).reverse(),
+                                borderColor: 'rgba(255, 149, 0, 0.5)',
+                                borderDash: [5, 5],
+                                fill: false,
+                                tension: 0.3,
+                                pointRadius: 0
+                            },
+                            {
+                                label: 'LSTM',
+                                data: logs.map(l => l.lstm).reverse(),
+                                borderColor: 'rgba(255, 59, 48, 0.5)',
+                                borderDash: [5, 5],
+                                fill: false,
+                                tension: 0.3,
+                                pointRadius: 0
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { 
+                            legend: { 
+                                display: true, 
+                                labels: { color: '#888', font: { size: 10 } } 
+                            } 
+                        },
+                        scales: {
+                            y: { beginAtZero: true, max: 1, ticks: { color: '#A0A0A0' } },
+                            x: { ticks: { color: '#A0A0A0', maxRotation: 45, autoSkip: true, maxTicksLimit: 6 } }
+                        }
+                    }
+                });
+
+            } catch (err) {
+                console.error("History load error:", err);
+            }
+        }
+        loadHistory();
+    </script>
+</body>
+</html>
