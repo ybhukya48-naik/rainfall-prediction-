@@ -13,3 +13,4 @@ statsmodels
 requests
 python-dotenv
 torch
+gunicorn

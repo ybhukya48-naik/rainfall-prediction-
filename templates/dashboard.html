@@ -6,6 +6,8 @@
     <title>RainAlert Mobile</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='mobile_style.css') }}">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
@@ -66,6 +68,11 @@
 
         <!-- Main Dashboard Card -->
         <div class="main-card">
+            <div id="radar-map-card" class="radar-map-card">
+                <label>Live Radar Map (RainViewer API)</label>
+                <div id="radar-map" style="height: 300px; border-radius: 15px; margin-bottom: 15px;"></div>
+            </div>
+            
             <div id="alert-banner" class="alert-banner hidden">
                 <span id="alert-text"></span>
                 <ul id="safety-tips" class="safety-list"></ul>
@@ -216,6 +223,17 @@
             <canvas id="trendChart"></canvas>
         </div>
 
+        <!-- Future Forecast Timeline -->
+        <div class="chart-card">
+            <label>5-Day Forecast Timeline (Probability %)</label>
+            <div class="forecast-timeline-container">
+                <div id="forecast-timeline" class="forecast-timeline">
+                    <!-- Populated via JS -->
+                    <p class="waiting">Enable Live OWM to see timeline...</p>
+                </div>
+            </div>
+        </div>
+
         <!-- Advanced Meteorological Features -->
         <div class="sensor-grid advanced-grid">
             <div class="sensor-card advanced">
@@ -289,7 +307,35 @@
         const stationSelect = document.getElementById('station-select');
         const outlook30m = document.getElementById('outlook-30m');
         const outlook1h = document.getElementById('outlook-1h');
+        const forecastTimeline = document.getElementById('forecast-timeline');
         
+        // Initialize Map
+        let map = L.map('radar-map').setView([20.5937, 78.9629], 5);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap'
+        }).addTo(map);
+
+        // Request Notif Permission
+        if (Notification.permission !== "granted") {
+            Notification.requestPermission();
+        }
+
+        let radarLayer = null;
+        async function updateRadar() {
+            try {
+                const resp = await fetch('https://api.rainviewer.com/public/weather-maps.json');
+                const data = await resp.json();
+                const latest = data.radar.past[data.radar.past.length - 1];
+                
+                if (radarLayer) map.removeLayer(radarLayer);
+                radarLayer = L.tileLayer(`${data.host}${latest.path}/256/{z}/{x}/{y}/2/1_1.png`, {
+                    opacity: 0.6
+                }).addTo(map);
+            } catch (e) { console.error("Radar update error", e); }
+        }
+        updateRadar();
+        setInterval(updateRadar, 600000); // Update every 10 mins
+
         // Settings State
         let warningThreshold = 0.6;
         let criticalThreshold = 0.8;
@@ -478,6 +524,16 @@
                 }
                 const result = await response.json();
 
+                // Browser Auto Alerts
+                if (result.prob >= criticalThreshold) {
+                    if (Notification.permission === "granted") {
+                        new Notification("CRITICAL RAIN ALERT", {
+                            body: `Station ${sid} reports ${(result.prob*100).toFixed(0)}% rain probability!`,
+                            icon: "/static/favicon.ico"
+                        });
+                    }
+                }
+
                 // Update UI sensors with real values from simulator
                 const sensors = result.sensors;
                 document.getElementById('iot-temp').innerText = `${sensors.temp}°C`;
@@ -487,6 +543,14 @@
                 document.getElementById('sat-info').innerText = `BTemp: ${sensors.btemp}K | VIS: ${sensors.reflect}`;
 
                 // Update Advanced Features
+                if (result.advanced_features) {
+                    document.getElementById('adv-dew').innerText = `${result.advanced_features.dew_point}°C`;
+                    document.getElementById('adv-moisture').innerText = `${result.advanced_features.moisture_advection}`;
+                    document.getElementById('adv-vpd').innerText = `${result.advanced_features.vpd} kPa`;
+                    document.getElementById('adv-instability').innerText = `${result.advanced_features.instability}`;
+                }
+
+                // Update Main ProbabilitiesAdvanced Features
                 if (result.advanced) {
                     const adv = result.advanced;
                     document.getElementById('adv-dew').innerText = `${adv.dew_point}°C`;
@@ -513,6 +577,30 @@
                 // Update Forecasts
                 outlook30m.innerText = `${(result.outlook_30m * 100).toFixed(0)}%`;
                 outlook1h.innerText = `${(result.outlook_1h * 100).toFixed(0)}%`;
+
+                // Update Forecast Timeline if available
+                if (result.owm_forecast && result.owm_forecast.length > 0) {
+                    forecastTimeline.innerHTML = '';
+                    result.owm_forecast.forEach(item => {
+                        const div = document.createElement('div');
+                        div.className = 'forecast-item';
+                        
+                        // Parse time from dt_txt (e.g. "2026-03-10 12:00:00")
+                        const timeStr = item.time.split(' ')[1].substring(0, 5);
+                        const dateStr = item.time.split(' ')[0].substring(5); // MM-DD
+                        
+                        const color = item.probability > 0.8 ? '#FF3B30' : (item.probability > 0.5 ? '#FF9500' : '#007AFF');
+                        
+                        div.innerHTML = `
+                            <span class="forecast-time">${dateStr} ${timeStr}</span>
+                            <div class="forecast-prob-bar">
+                                <div class="forecast-prob-fill" style="height: ${item.probability * 100}%; background: ${color};"></div>
+                            </div>
+                            <span class="forecast-prob-text" style="color: ${color};">${(item.probability * 100).toFixed(0)}%</span>
+                        `;
+                        forecastTimeline.appendChild(div);
+                    });
+                }
 
                 // Update Notification Hub
                 if (result.alert) {
