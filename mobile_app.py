@@ -292,6 +292,9 @@ def run_prediction_engine(data, station_id):
     sorted_imp = sorted(importance.items(), key=lambda x: x[1], reverse=True)
     top1, top2 = sorted_imp[0], sorted_imp[1]
     
+    # 8. Forecast Visualization Data
+    # We already have outlook_30m and outlook_1h, but let's ensure they are returned
+    
     reasoning = f"The {prob*100:.0f}% probability is primarily driven by {top1[0]} ({top1[1]:.0f}%) "
     reasoning += f"and {top2[0]} ({top2[1]:.0f}%). "
     
@@ -355,6 +358,14 @@ def api_predict():
         data = request.json
         station_id = data.get('station_id', 'STN_001')
         
+        # Check for sustained risk alerts (Placeholder for SMS/Twilio)
+        # We can look at the station_history to see if probability > 80% for last 3 readings
+        if station_id in station_history and len(station_history[station_id]) >= 3:
+            recent_probs = station_history[station_id][-3:]
+            if all(p > 0.8 for p in recent_probs):
+                app.logger.warning(f"SUSTAINED CRITICAL RISK at {station_id}: Probs={recent_probs}")
+                # Placeholder for Twilio call: send_sms_alert(f"Critical rain risk at {station_id} for last 3 periods.")
+
         # Run prediction
         res = run_prediction_engine(data, station_id)
         if res is None:
@@ -370,9 +381,12 @@ def api_predict():
         
         # Overwrite with OpenWeatherMap if requested
         owm_info = None
+        owm_forecast = []
         if data.get('use_owm'):
-            from owm_utils import get_live_weather
+            from owm_utils import get_live_weather, get_live_forecast
             lat, lon = STATIONS[station_id]['lat'], STATIONS[station_id]['lon']
+            
+            # Get Current Weather
             owm_data = get_live_weather(lat, lon)
             if owm_data['success']:
                 owm_info = {
@@ -383,13 +397,20 @@ def api_predict():
                     'hum': owm_data['hum']
                 }
                 # Strategic blend with real-time OWM
-                # If OWM says it's raining, we significantly boost the probability
                 is_raining_real = any(word in owm_info['desc'].lower() for word in ['rain', 'drizzle', 'thunderstorm'])
                 if is_raining_real:
-                    prob = max(prob, 0.85) # Force high prob if real rain is reported
+                    prob = max(prob, 0.85)
                 else:
-                    # If not raining, we still blend for realism
                     prob = (prob * 0.6) + (0.1 if 'cloud' in owm_info['desc'].lower() else 0.0)
+            
+            # Get Forecast (Timeline)
+            forecast_data = get_live_forecast(lat, lon)
+            if forecast_data['success']:
+                for item in forecast_data['forecast'][:12]: # Next 36 hours
+                    owm_forecast.append({
+                        'time': item['dt_txt'],
+                        'probability': item['rain_prob']
+                    })
 
         # Update Buffer
         if station_id not in station_history:
@@ -450,6 +471,7 @@ def api_predict():
                 'db_size_kb': os.path.getsize(DATABASE_PATH) // 1024
             },
             'owm_live': owm_info,
+            'owm_forecast': owm_forecast,
             'sensors': sensors,
             'advanced': res.get('advanced_features', {})
         })
@@ -555,7 +577,8 @@ def get_latest_prediction(station_id):
             'db_size_kb': os.path.getsize(DATABASE_PATH) // 1024
         },
         'sensors': sensors,
-        'timestamp': row[1]
+        'timestamp': row[1],
+        'owm_forecast': [] # Empty for non-live history fetch
     })
 
 @app.route('/api/export')
@@ -580,4 +603,5 @@ def export_csv():
     return output
 
 if __name__ == "__main__":
-    app.run(debug=False, host="0.0.0.0", port=5003)
+    port = int(os.environ.get("PORT", 5003))
+    app.run(debug=False, host="0.0.0.0", port=port)
